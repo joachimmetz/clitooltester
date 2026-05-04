@@ -1,0 +1,16 @@
+Inode: 22   Type: regular    Mode:  0664   Flags: 0x80000
+Generation: 1550207938    Version: 0x00000000:00000001
+User:  1000   Group:  1000   Project:     0   Size: 0
+File ACL: 49
+Links: 1   Blockcount: 2
+Fragment:  Address: 0    Number: 0    Size: 0
+ ctime: 0x5f3d73f4:2bf56304 -- Wed Aug 19 18:48:20 2020
+ atime: 0x5f3d73f4:2bb859fc -- Wed Aug 19 18:48:20 2020
+ mtime: 0x5f3d73f4:2bb859fc -- Wed Aug 19 18:48:20 2020
+crtime: 0x5f3d73f4:2bb859fc -- Wed Aug 19 18:48:20 2020
+Size of extra inode fields: 32
+Extended attributes:
+  security.selinux (37) = "unconfined_u:object_r:unlabeled_t:s0\000"
+  user.myxattr (21) = "My extended attribute"
+Inode checksum: 0xaf09bdb6
+EXTENTS:

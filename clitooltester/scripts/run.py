@@ -46,7 +46,8 @@ def Main():
 
     runner = test_runner.TestRunner()
 
-    runner.ReadConfiguration(options.configuration)
+    runner.read_configuration(options.configuration)
+    runner.run()
 
     return 0
 

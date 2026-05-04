@@ -1,8 +1,6 @@
 """Shared test case."""
 
 import os
-import shutil
-import tempfile
 import unittest
 
 # The path to top of the clitooltester source tree.
@@ -46,21 +44,3 @@ class BaseTestCase(unittest.TestCase):
         if not os.path.exists(path):
             filename = os.path.basename(path)
             raise unittest.SkipTest(f"missing test file: {filename:s}")
-
-
-class TempDirectory:
-    """Class that implements a temporary directory."""
-
-    def __init__(self):
-        """Initializes a temporary directory."""
-        super().__init__()
-        self.name = ""
-
-    def __enter__(self):
-        """Make this work with the 'with' statement."""
-        self.name = tempfile.mkdtemp()
-        return self.name
-
-    def __exit__(self, unused_type, unused_value, unused_traceback):
-        """Make this work with the 'with' statement."""
-        shutil.rmtree(self.name, True)

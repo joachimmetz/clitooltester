@@ -25,6 +25,7 @@ dependencies = [
 run = "clitooltester.scripts.run:Main"
 
 [project.urls]
+Documentation = "https://clitooltester.readthedocs.io/en/latest"
 Homepage = "https://github.com/dfirlabs/clitooltester"
 Repository = "https://github.com/dfirlabs/clitooltester"
 

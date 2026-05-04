@@ -1,0 +1,14 @@
+Inode: 22   Type: regular    Mode:  0664   Flags: 0x0
+Generation: 825520578    Version: 0x00000001
+User:  1000   Group:  1000   Size: 0
+File ACL: 165
+Links: 1   Blockcount: 2
+Fragment:  Address: 0    Number: 0    Size: 0
+ctime: 0x5f3d73e1 -- Wed Aug 19 18:48:01 2020
+atime: 0x5f3d73e1 -- Wed Aug 19 18:48:01 2020
+mtime: 0x5f3d73e1 -- Wed Aug 19 18:48:01 2020
+Extended attributes:
+  user.myxattr (21) = "My extended attribute"
+  security.selinux (37) = "unconfined_u:object_r:unlabeled_t:s0\000"
+BLOCKS:
+

@@ -1,14 +1,45 @@
 """Command line tool test runner."""
 
-from __future__ import unicode_literals
+import subprocess
 
 
 class TestRunner:
-    """Command line tool test runner."""
+    """Runs a command line tool test."""
 
-    def ReadConfiguration(self, path):
+    def read_configuration(self, path):
         """Reads the configuration from a file.
 
         Args:
           path (str): path of the configuration file.
         """
+
+    def run(self):
+        """Runs a command line tool test."""
+        arguments = [
+            "docker",
+            "run",
+            "--network=none",
+            "--quiet",
+            "--read-only",
+            "hello-world",
+        ]
+        result = subprocess.run(
+            arguments,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"[\033[91mFAIL\033[0m] {result.stderr:s}")
+            return
+
+        if result.stderr:
+            print(f"[\033[91mFAIL\033[0m] unexpected output to stderr")
+            print(result.stderr)
+            return
+
+        if "Hello from Docker!" not in result.stdout:
+            print(f"[\033[91mFAIL\033[0m] unexpected output to stdout")
+            print(result.stdout)
+            return
+
+        print(f"[\033[92mPASS\033[0m]")

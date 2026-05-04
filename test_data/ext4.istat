@@ -1,0 +1,20 @@
+inode: 22
+Allocated
+Group: 0
+Generation Id: 1550207938
+uid / gid: 1000 / 1000
+mode: rrw-rw-r--
+Flags: Extents, 
+size: 0
+num of links: 1
+
+Extended Attributes  (Block: 49)
+user.myxattr=My extended attribute
+
+Inode Times:
+Accessed:	2020-08-19 18:48:20.183375487 (UTC)
+File Modified:	2020-08-19 18:48:20.183375487 (UTC)
+Inode Modified:	2020-08-19 18:48:20.184375489 (UTC)
+File Created:	2020-08-19 18:48:20.183375487 (UTC)
+
+Direct Blocks:

@@ -1,0 +1,19 @@
+inode: 22
+Allocated
+Group: 0
+Generation Id: 825520578
+uid / gid: 1000 / 1000
+mode: rrw-rw-r--
+size: 0
+num of links: 1
+
+Extended Attributes  (Block: 165)
+user.myxattr=My extended attribute
+security.selinux=unconfined_u:object_r:unlabeled_t:s0
+
+Inode Times:
+Accessed:	2020-08-19 18:48:01 (UTC)
+File Modified:	2020-08-19 18:48:01 (UTC)
+Inode Modified:	2020-08-19 18:48:01 (UTC)
+
+Direct Blocks:
