@@ -366,12 +366,13 @@ class TestRunner:
 
         test_result = resources.TestResult()
         test_result.start_time = time.time_ns()
+        test_env = getattr(test_definition.package, "env", None)
 
         subprocess_result = subprocess.run(
             arguments,
             capture_output=True,
             check=False,
-            env=test_definition.package.env,
+            env=test_env,
             shell=False,
             text=True,
         )
@@ -437,7 +438,7 @@ class TestRunner:
                 )
 
             try:
-                hdiutil_info = plistlib.load(result.stdout)
+                hdiutil_info = plistlib.loads(result.stdout)
             except Exception as exception:
                 raise RuntimeError(
                     "Unable to parse output of: 'hdiutil info -plist'"
