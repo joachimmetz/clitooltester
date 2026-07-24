@@ -49,51 +49,83 @@ class TestRunner:
           RuntimeError: if the sudo or mount binary does not exist or the test input
               could not be mounted.
         """
-        # TODO: add support for "Mount-VHD -Path %input%"
+        # Windows: mount VHD/VHDX using PowerShell
+        if sys.platform == "win32":
+            powershell_path = shutil.which("powershell")
+            if not powershell_path:
+                powershell_path = shutil.which("pwsh")
+                if not powershell_path:
+                    raise RuntimeError(
+                        "Unable to determine location of powershell binary"
+                    )
 
-        arguments = []
+            escaped_path = path.replace("'", "''")
 
-        hdiutil_path = shutil.which("hdiutil")
-        if hdiutil_path:
-            arguments = [
-                hdiutil_path,
-                "attach",
-                "-nobrowse",
-                "-readonly",
-                "-mountroot",
-                self._mount_point,
-                path,
-            ]
+            result = subprocess.run(
+                [
+                    powershell_path,
+                    "-NoProfile",
+                    "-Command",
+                    f"Mount-VHD -Path '{escaped_path}' -ReadOnly | Import-Csv -Header DriveLetter | Select-Object -ExpandProperty DriveLetter",
+                ],
+                capture_output=True,
+                check=False,
+                shell=False,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+
         else:
-            sudo_path = shutil.which("sudo")
-            if not sudo_path:
-                raise RuntimeError("Unable to determine location of sudo binary")
+            hdiutil_path = shutil.which("hdiutil")
+            if hdiutil_path:
+                arguments = [
+                    hdiutil_path,
+                    "attach",
+                    "-nobrowse",
+                    "-readonly",
+                    "-mountroot",
+                    self._mount_point,
+                    path,
+                ]
 
-            mount_path = shutil.which("mount")
-            if not mount_path:
-                raise RuntimeError("Unable to determine location of mount binary")
+                result = subprocess.run(
+                    arguments,
+                    capture_output=True,
+                    check=False,
+                    shell=False,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
 
-            arguments = [
-                sudo_path,
-                mount_path,
-                "-o",
-                "ro,loop",
-                path,
-                self._mount_point,
-            ]
+            else:
+                sudo_path = shutil.which("sudo")
+                if not sudo_path:
+                    raise RuntimeError("Unable to determine location of sudo binary")
 
-        if not arguments:
-            raise RuntimeError("Unable to determine how to mount input")
+                mount_path = shutil.which("mount")
+                if not mount_path:
+                    raise RuntimeError("Unable to determine location of mount binary")
 
-        result = subprocess.run(
-            arguments,
-            capture_output=True,
-            check=False,
-            shell=False,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+                arguments = [
+                    sudo_path,
+                    mount_path,
+                    "-o",
+                    "ro,loop",
+                    path,
+                    self._mount_point,
+                ]
+
+                result = subprocess.run(
+                    arguments,
+                    capture_output=True,
+                    check=False,
+                    shell=False,
+                    text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
 
     def _NormalizeStdout(self, normalizer, stdout):
         """Normalizes stdout.
@@ -420,22 +452,49 @@ class TestRunner:
           RuntimeError: if the sudo or umount binary does not exist or the test input
               could not be unmounted.
         """
-        # TODO: add support for "Dismount-VHD -Path %input%"
+        # Windows: dismount VHD/VHDX using PowerShell
+        if sys.platform == "win32":
+            powershell_path = shutil.which("powershell")
+            if not powershell_path:
+                powershell_path = shutil.which("pwsh")
+                if not powershell_path:
+                    raise RuntimeError(
+                        "Unable to determine location of powershell binary"
+                    )
 
-        hdiutil_path = shutil.which("hdiutil")
-        if hdiutil_path:
+            escaped_path = path.replace("'", "''")
+
             result = subprocess.run(
-                [hdiutil_path, "info", "-plist"],
+                [
+                    powershell_path,
+                    "-NoProfile",
+                    "-Command",
+                    f"Dismount-VHD -Path '{escaped_path}'",
+                ],
                 capture_output=True,
-                check=True,
+                check=False,
                 shell=False,
                 text=True,
             )
             if result.returncode != 0:
                 raise RuntimeError(
-                    f"Unable to run: 'hdiutil info -plist' with error: "
-                    f"{result.stderr:s}"
+                    f"Unable to dismount input with error: {result.stderr:s}"
                 )
+        else:
+            hdiutil_path = shutil.which("hdiutil")
+            if hdiutil_path:
+                hdiutil_info_result = subprocess.run(
+                    [hdiutil_path, "info", "-plist"],
+                    capture_output=True,
+                    check=True,
+                    shell=False,
+                    text=True,
+                )
+                if hdiutil_info_result.returncode != 0:
+                    raise RuntimeError(
+                        f"Unable to run: 'hdiutil info -plist' with error: "
+                        f"{hdiutil_info_result.stderr:s}"
+                    )
 
             try:
                 hdiutil_info = plistlib.loads(result.stdout)
@@ -444,25 +503,50 @@ class TestRunner:
                     "Unable to parse output of: 'hdiutil info -plist'"
                 ) from exception
 
-            path = os.path.abspath(path)
-            volume_paths = []
-            for image in hdiutil_info.get("images") or []:
-                image_path = image.get("image-path")
-                if not image_path:
-                    continue
+                path = os.path.abspath(path)
+                volume_paths = []
+                for image in hdiutil_info.get("images") or []:
+                    image_path = image.get("image-path")
+                    if not image_path:
+                        continue
 
-                image_path = os.path.abspath(image_path)
-                if path != image_path:
-                    continue
+                    image_path = os.path.abspath(image_path)
+                    if path != image_path:
+                        continue
 
-                for system_entity in image.get("system-entities") or []:
-                    mount_point = system_entity.get("mount-point")
-                    if mount_point:
-                        volume_paths.append(mount_point)
+                    for system_entity in image.get("system-entities") or []:
+                        mount_point = system_entity.get("mount-point")
+                        if mount_point:
+                            volume_paths.append(mount_point)
 
-            result = True
-            for volume_path in volume_paths:
-                arguments = [hdiutil_path, "detach", volume_path]
+                result = True
+                for volume_path in volume_paths:
+                    arguments = [hdiutil_path, "detach", volume_path]
+
+                    try:
+                        subprocess.run(
+                            arguments,
+                            capture_output=True,
+                            check=True,
+                            shell=False,
+                            text=True,
+                        )
+                    except subprocess.CalledProcessError:
+                        result = False
+
+                if not result:
+                    raise RuntimeError("Unable to umount input")
+
+            else:
+                sudo_path = shutil.which("sudo")
+                if not sudo_path:
+                    raise RuntimeError("Unable to determine location of sudo binary")
+
+                umount_path = shutil.which("umount")
+                if not umount_path:
+                    raise RuntimeError("Unable to determine location of umount binary")
+
+                arguments = [sudo_path, umount_path, self._mount_point]
 
                 try:
                     subprocess.run(
@@ -472,33 +556,8 @@ class TestRunner:
                         shell=False,
                         text=True,
                     )
-                except subprocess.CalledProcessError:
-                    result = False
-
-            if not result:
-                raise RuntimeError("Unable to umount input")
-
-        else:
-            sudo_path = shutil.which("sudo")
-            if not sudo_path:
-                raise RuntimeError("Unable to determine location of sudo binary")
-
-            umount_path = shutil.which("umount")
-            if not umount_path:
-                raise RuntimeError("Unable to determine location of umount binary")
-
-            arguments = [sudo_path, umount_path, self._mount_point]
-
-            try:
-                subprocess.run(
-                    arguments,
-                    capture_output=True,
-                    check=True,
-                    shell=False,
-                    text=True,
-                )
-            except subprocess.CalledProcessError as exception:
-                raise RuntimeError("Unable to umount input") from exception
+                except subprocess.CalledProcessError as inner_exception:
+                    raise RuntimeError("Unable to umount input") from inner_exception
 
     def _WriteReferenceFile(
         self,
