@@ -60,21 +60,65 @@ class TestRunner:
                     )
 
             escaped_path = path.replace("'", "''")
+            pid = os.getpid()
+            mount_result_file = f"/tmp/mount_point_{pid:d}.tmp"
+            mount_script_file = f"/tmp/mount_script_{pid:d}.ps1"
 
-            result = subprocess.run(
-                [
-                    powershell_path,
-                    "-NoProfile",
-                    "-Command",
-                    f"Mount-DiskImage -ImagePath '{escaped_path:s}' -ReadOnly | Select-Object -ExpandProperty MountPoint",
-                ],
-                capture_output=True,
-                check=False,
-                shell=False,
-                text=True,
-            )
+            with open(mount_script_file, "w", encoding="utf-8") as file_object:
+                file_object.write(
+                    f"Mount-DiskImage -ImagePath '{escaped_path:s}' -ReadOnly | "
+                    f"Select-Object -ExpandProperty MountPoint | "
+                    f"Out-File '{mount_result_file}'\n"
+                )
+
+            arguments = [
+                powershell_path,
+                "-NoProfile",
+                "-Command",
+                (
+                    f"$proc = Start-Process powershell -Verb RunAs -ArgumentList "
+                    f"'-NoProfile', '-File \\'{mount_script_file:s}\\'' -PassThru; "
+                    f"$proc.WaitForExit(); $i = 0; "
+                    f"while ((-not (Test-Path \\'{mount_result_file:s}\\')) -and "
+                    f"($i -lt 60)) {{ Start-Sleep -Milliseconds 100; $i++ }}; "
+                    f"Get-Content \\'{mount_result_file:s}\\' -Raw"
+                ),
+            ]
+            try:
+                result = subprocess.run(
+                    arguments,
+                    capture_output=True,
+                    check=False,
+                    shell=True,
+                    text=True,
+                )
+                mount_point = result.stdout.strip() if result.stdout else ""
+                if mount_point:
+                    result = subprocess.CompletedProcess(
+                        args=result.args,
+                        returncode=0,
+                        stdout=mount_point,
+                        stderr=result.stderr,
+                    )
+                else:
+                    result = subprocess.CompletedProcess(
+                        args=result.args,
+                        returncode=-1,
+                        stdout="",
+                        stderr="Mount operation failed or was cancelled by user",
+                    )
+            finally:
+                try:
+                    os.remove(mount_script_file)
+                    if os.path.exists(mount_result_file):
+                        os.remove(mount_result_file)
+                except OSError:
+                    pass
+
             if result.returncode != 0:
-                raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+                raise RuntimeError(
+                    f"Unable to mount input with error: {result.stderr:s}"
+                )
 
         else:
             hdiutil_path = shutil.which("hdiutil")
@@ -97,7 +141,9 @@ class TestRunner:
                     text=True,
                 )
                 if result.returncode != 0:
-                    raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+                    raise RuntimeError(
+                        f"Unable to mount input with error: {result.stderr:s}"
+                    )
 
             else:
                 sudo_path = shutil.which("sudo")
@@ -125,7 +171,9 @@ class TestRunner:
                     text=True,
                 )
                 if result.returncode != 0:
-                    raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+                    raise RuntimeError(
+                        f"Unable to mount input with error: {result.stderr:s}"
+                    )
 
     def _NormalizeStdout(self, normalizer, stdout):
         """Normalizes stdout.
@@ -464,18 +512,35 @@ class TestRunner:
 
             escaped_path = path.replace("'", "''")
 
-            result = subprocess.run(
-                [
-                    powershell_path,
-                    "-NoProfile",
-                    "-Command",
-                    f"Dismount-VHD -Path '{escaped_path}'",
-                ],
-                capture_output=True,
-                check=False,
-                shell=False,
-                text=True,
-            )
+            # Dismount-DiskImage requires administrator privileges
+            pid = os.getpid()
+            dismount_script_file = f"/tmp/dismount_script_{pid:d}.ps1"
+            with open(dismount_script_file, "w") as f:
+                f.write(f"Dismount-DiskImage -ImagePath '{escaped_path:s}'\n")
+
+            arguments = [
+                powershell_path,
+                "-NoProfile",
+                "-Command",
+                (
+                    f"Start-Process powershell -Verb RunAs -ArgumentList "
+                    f"'-NoProfile', '-File \\'{dismount_script_file}\\'' -Wait;"
+                ),
+            ]
+            try:
+                result = subprocess.run(
+                    arguments,
+                    capture_output=True,
+                    check=False,
+                    shell=True,
+                    text=True,
+                )
+            finally:
+                try:
+                    os.remove(dismount_script_file)
+                except OSError:
+                    pass
+
             if result.returncode != 0:
                 raise RuntimeError(
                     f"Unable to dismount input with error: {result.stderr:s}"
