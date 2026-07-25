@@ -66,7 +66,7 @@ class TestRunner:
                     powershell_path,
                     "-NoProfile",
                     "-Command",
-                    f"Mount-VHD -Path '{escaped_path}' -ReadOnly | Import-Csv -Header DriveLetter | Select-Object -ExpandProperty DriveLetter",
+                    f"Mount-DiskImage -ImagePath '{escaped_path:s}' -ReadOnly | Select-Object -ExpandProperty MountPoint",
                 ],
                 capture_output=True,
                 check=False,
