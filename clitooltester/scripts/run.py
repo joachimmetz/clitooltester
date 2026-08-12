@@ -26,6 +26,14 @@ def Main():
         help="path of the inputs configuration file.",
     )
     argument_parser.add_argument(
+        "--input_sets",
+        "--input-sets",
+        dest="input_sets",
+        action="store",
+        default=None,
+        help="comma separated list of names of the inputs sets to include.",
+    )
+    argument_parser.add_argument(
         "-j",
         "--jobs",
         dest="jobs",
@@ -105,7 +113,9 @@ def Main():
     if not options.inputs:
         test_results = runner.RunTests(test_definition, jobs=options.jobs)
     else:
-        test_inputs = runner.ReadInputsConfiguration(options.inputs)
+        test_inputs = runner.ReadInputsConfiguration(
+            options.inputs, sets_to_include=set(options.input_sets.split(","))
+        )
         test_results = runner.RunTests(
             test_definition, jobs=options.jobs, test_inputs=test_inputs
         )

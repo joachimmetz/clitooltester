@@ -682,18 +682,26 @@ class TestRunner:
 
         return result.returncode
 
-    def ReadInputsConfiguration(self, path):
+    def ReadInputsConfiguration(self, path, sets_to_include=None):
         """Reads the inputs configuration from a file.
 
         Args:
           path (str): path of the configuration file.
+          sets_to_include (set[str]): names of the inputs sets to include.
 
         Returns:
           list[InputDefinitions]: input definitions.
         """
         yaml_definition_file = yaml_definitions_file.YAMLInputsDefinitionsFile()
 
-        return list(yaml_definition_file.ReadFromFile(path))
+        if not sets_to_include:
+            return list(yaml_definition_file.ReadFromFile(path))
+
+        return [
+            definition
+            for definition in yaml_definition_file.ReadFromFile(path)
+            if definition.set_name in sets_to_include
+        ]
 
     def ReadTestConfiguration(self, path):
         """Reads the test configuration from a file.

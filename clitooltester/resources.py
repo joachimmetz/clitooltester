@@ -26,6 +26,7 @@ class InputDefinition:
       name (str): name that uniquely identifies the input.
       paramters (dict[str, str]): parameters accompanying the input.
       path (str): location of the input.
+      set_name (str): name of set the input is part of.
     """
 
     def __init__(self):
@@ -35,6 +36,7 @@ class InputDefinition:
         self.name = None
         self.parameters = {}
         self.path = None
+        self.set_name = None
 
 
 class InputSetDefinition:

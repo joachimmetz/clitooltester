@@ -167,6 +167,7 @@ class YAMLInputsDefinitionsFile:
                     )
                     if element.parameters:
                         element_definition.parameters = element.parameters.copy()
+                    element_definition.set_name = input_definition.name
 
                     yield element_definition
 
