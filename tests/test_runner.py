@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests of the command line tool test runner."""
 
+import gzip
 import os
 import tempfile
 import unittest
@@ -29,16 +30,27 @@ class TestRunnerTest(test_lib.BaseTestCase):
                     "import sys\n\nsys.stdout.write(sys.stdin.read().strip())\n"
                 )
 
-            result = runner._NormalizeStdout(
+            run_step_result = runner._NormalizeStdout(
                 normalizer,
-                "hello world\n",
+                gzip.compress(b"hello world\n"),
             )
-            self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, "hello world")
+            self.assertEqual(run_step_result.get_exit_code(), 0)
+            self.assertEqual(
+                gzip.decompress(run_step_result.get_output()), b"hello world"
+            )
+            self.assertEqual(gzip.decompress(run_step_result.get_error_message()), b"")
 
         # Test with nonexistent normalization script
-        with self.assertRaises(RuntimeError):
-            runner._NormalizeStdout("/nonexistent/script.py", "output")
+        run_step_result = runner._NormalizeStdout(
+            "/nonexistent/script.py",
+            gzip.compress(b"hello world\n"),
+        )
+        self.assertEqual(run_step_result.get_exit_code(), 1)
+        self.assertEqual(gzip.decompress(run_step_result.get_output()), b"")
+        self.assertEqual(
+            gzip.decompress(run_step_result.get_error_message()),
+            b"Missing normalizer: /nonexistent/script.py",
+        )
 
     def testProcessStdout(self):
         """Tests _ProcessStdout function."""
@@ -307,7 +319,66 @@ class TestRunnerTest(test_lib.BaseTestCase):
         result = runner._SubstitutePlaceholders(command, test_values)
         self.assertEqual(result, "/path and /path")
 
-    # TODO: add tests _ValidateStdout
+    def testValidateStdout(self):
+        """Tests _ValidateStdout function."""
+        runner = test_runner.TestRunner(quiet=True)
+
+        validator_script = (
+            "import sys\n"
+            "\n"
+            "with open(sys.argv[1], encoding='utf-8') as f:\n"
+            "    reference = f.read()\n"
+            "\n"
+            "input = sys.stdin.read()\n"
+            "\n"
+            "if input != reference:\n"
+            "    print('Mismatch')\n"
+            "    sys.exit(1)\n"
+            "\n"
+            "print('Match')\n"
+            "sys.exit(0)\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            validator = os.path.join(temporary_directory, "validator.py")
+            with open(validator, "w", encoding="utf-8") as file_object:
+                file_object.write(validator_script)
+
+            reference_file = os.path.join(temporary_directory, "reference.txt")
+            with open(reference_file, "w", encoding="utf-8") as file_object:
+                file_object.write("hello world\n")
+
+            run_step_result = runner._ValidateStdout(
+                validator,
+                reference_file,
+                gzip.compress(b"hello world\n"),
+            )
+            self.assertEqual(run_step_result.get_exit_code(), 0)
+            self.assertEqual(gzip.decompress(run_step_result.get_output()), b"Match\n")
+            self.assertEqual(gzip.decompress(run_step_result.get_error_message()), b"")
+
+        # Test with validation failure
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            validator = os.path.join(temporary_directory, "validator.py")
+            with open(validator, "w", encoding="utf-8") as file_object:
+                file_object.write(validator_script)
+
+            reference_file = os.path.join(temporary_directory, "reference.txt")
+            with open(reference_file, "w", encoding="utf-8") as file_object:
+                file_object.write("hello universe\n")
+
+            run_step_result = runner._ValidateStdout(
+                validator,
+                reference_file,
+                gzip.compress(b"hello world\n"),
+            )
+            self.assertEqual(run_step_result.get_exit_code(), 1)
+            self.assertEqual(
+                gzip.decompress(run_step_result.get_output()), b"Mismatch\n"
+            )
+            self.assertEqual(gzip.decompress(run_step_result.get_error_message()), b"")
+
+        # TODO: Test with nonexistent validation script
+        # TODO: Test with nonexistent reference file
 
     @mock.patch("clitooltester.test_runner.subprocess.run")
     @mock.patch("clitooltester.test_runner.os.environ")

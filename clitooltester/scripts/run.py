@@ -31,7 +31,7 @@ def Main():
         dest="input_sets",
         action="store",
         default=None,
-        help="comma separated list of names of the inputs sets to include.",
+        help="comma separated list of names of the inputs sets to use.",
     )
     argument_parser.add_argument(
         "-j",
@@ -49,6 +49,14 @@ def Main():
         action="store",
         default=None,
         help="path to write test results log file.",
+    )
+    argument_parser.add_argument(
+        "--no_stdout",
+        "--no-stdout",
+        dest="verbose_stdout",
+        action="store_false",
+        default=True,
+        help="do not show stdout in verbose output.",
     )
     argument_parser.add_argument(
         "-v",
@@ -87,8 +95,12 @@ def Main():
         print(f"Unsupported number of jobs: {options.jobs:d}")
         return 1
 
+    verbose_stdout = options.verbose and options.verbose_stdout
+    verbose_stderr = options.verbose
+
     runner = test_runner.TestRunner(
-        verbose=options.verbose,
+        verbose_stderr=verbose_stderr,
+        verbose_stdout=verbose_stdout,
         write_references=options.write_references,
     )
     try:

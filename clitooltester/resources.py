@@ -1,5 +1,8 @@
 """Resources."""
 
+import gzip
+import subprocess
+
 
 class DockerDefinition:
     """Docker definition.
@@ -76,6 +79,88 @@ class PackageDefinition:
         self.path = None
 
 
+class RunStepResult:
+    """Result of an individual run strp.
+
+    Attributes:
+      process_status (CompletedProcess): process status.
+      stderr (bytes): gzip compressed stderr.
+      stdout (bytes): gzip compressed stdout.
+    """
+
+    def __init__(
+        self, error_message=None, process_status=None, stderr=None, stdout=None
+    ):
+        """Initializes a run result.
+
+        Args:
+          error_message (Optional[str]): error message.
+          process_status (Optional[CompletedProcess]): process status.
+          stderr (Optional[bytes]): gzip compressed stderr.
+          stdout (Optional[bytes]): gzip compressed stdout.
+        """
+        super().__init__()
+        self._error_message = error_message
+        self.process_status = process_status
+        self.stderr = stderr
+        self.stdout = stdout
+
+    def get_error_message(self):
+        """Retrieves the error message.
+
+        Returns:
+          bytes: gzip compressed error message or stderr.
+        """
+        if self._error_message:
+            return gzip.compress(self._error_message.encode("utf-8"))
+
+        if self.stderr:
+            return self.stderr
+
+        if self.process_status:
+            return gzip.compress(self.process_status.stderr.encode("utf-8"))
+
+        return gzip.compress(b"")
+
+    def get_exit_code(self):
+        """Retrieves the exit code.
+
+        Returns:
+          int: exit code.
+        """
+        if self.process_status:
+            return self.process_status.returncode
+        return 1
+
+    def get_output(self):
+        """Retrieves the output.
+
+        Returns:
+          bytes: gzip compressed stdout.
+        """
+        if self.stdout:
+            return self.stdout
+
+        if self.process_status:
+            return gzip.compress(self.process_status.stdout.encode("utf-8"))
+
+        return gzip.compress(b"")
+
+    def is_success(self):
+        """Determines if the run succeeded.
+
+        Returns:
+          bool: True if the run failed, False other size.
+        """
+        if self._error_message:
+            return False
+
+        if self.process_status:
+            return self.process_status.returncode == 0
+
+        return True
+
+
 class StdoutDefinition:
     """Stdout definition.
 
@@ -135,8 +220,8 @@ class TestResult:
       exit_code (int): exit code from the test command.
       sequence_number (int): sequence number.
       start_time (int): test start time in nanoseconds.
-      stderr (str): standard error from the test command.
-      stdout (str): standard output from the test command.
+      stderr (bytes): gzip compressed stderr.
+      stdout (bytes): gzip compressed stdout.
       success (bool): True if the test was successful.
     """
 

@@ -1,5 +1,6 @@
 """Command line tool test runner."""
 
+import gzip
 import os
 import pathlib
 import plistlib
@@ -12,6 +13,7 @@ import time
 
 from concurrent import futures
 
+from clitooltester import gzip_file
 from clitooltester import resources
 from clitooltester import yaml_definitions_file
 
@@ -21,14 +23,22 @@ class TestRunner:
 
     _PLACEHOLDER_RE = re.compile(r"%[0-9A-Za-z_]+%")
 
-    def __init__(self, quiet=False, verbose=False, write_references=False):
+    def __init__(
+        self,
+        quiet=False,
+        verbose_stderr=False,
+        verbose_stdout=True,
+        write_references=False,
+    ):
         """Initializes a command line tool test runner.
 
         Args:
           quiet (Optional[bool]): value to indicate all prints should be disabled,
               overrides verbose.
-          verbose (Optional[bool]): value to indicate stdout and stderr should be
-              printed on error.
+          verbose_stderr (Optional[bool]): value to indicate stderr should be printed
+              on error.
+          verbose_stdout (Optional[bool]): value to indicate stdout should be printed
+              on error.
           write_references (Optional[bool]): value to indicate to write reference files.
         """
         super().__init__()
@@ -36,7 +46,8 @@ class TestRunner:
         # TODO: allow to set mount point in configuration
         self._mount_point = "/mnt/clitooltester"
         self._quiet = quiet
-        self._verbose = verbose
+        self._verbose_stderr = verbose_stderr
+        self._verbose_stdout = verbose_stdout
         self._write_references = write_references
 
     def _MountInput(self, path):
@@ -85,15 +96,18 @@ class TestRunner:
         if not arguments:
             raise RuntimeError("Unable to determine how to mount input")
 
-        result = subprocess.run(
+        subprocess_result = subprocess.run(
             arguments,
             capture_output=True,
             check=False,
+            encoding="utf-8",
             shell=False,
             text=True,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"Unable to mount input with error: {result.stderr:s}")
+        if subprocess_result.returncode != 0:
+            raise RuntimeError(
+                f"Unable to mount input with error: {subprocess_result.stderr:s}"
+            )
 
     def _NormalizeStdout(self, normalizer, stdout):
         """Normalizes stdout.
@@ -103,26 +117,45 @@ class TestRunner:
           stdout (str): stdout to normalize.
 
         Returns:
-          CompletedProcess: normalizer process object.
-
-        Raises:
-          RuntimeError: if normalizer script or binary does not exist.
+          RunStepResult: normalizer results.
         """
         arguments = shlex.split(normalizer, posix=self._is_posix)
 
         if not os.path.isfile(arguments[0]):
-            raise RuntimeError(f"Missing normalizer: {normalizer:s}")
+            return resources.RunStepResult(
+                error_message=f"Missing normalizer: {normalizer:s}"
+            )
 
         if arguments[0].endswith(".py"):
-            arguments.insert(0, sys.executable)
+            arguments = [sys.executable] + arguments
+        elif arguments[0].endswith(".sh"):
+            shell = os.environ.get("SHELL", "/bin/bash")
 
-        return subprocess.run(
-            arguments,
-            capture_output=True,
-            check=False,
-            input=stdout,
-            shell=False,
-            text=True,
+            arguments = [shell, "-l", "-i", "-c"] + arguments
+
+        with (
+            gzip_file.GzipStdoutReader(stdout) as gzip_stdin,
+            gzip_file.GzipStdoutWriter() as gzip_stdout,
+            gzip_file.GzipStdoutWriter() as gzip_stderr,
+        ):
+            subprocess_result = subprocess.run(
+                arguments,
+                check=False,
+                encoding="utf-8",
+                shell=False,
+                stdin=gzip_stdin,
+                stderr=gzip_stderr,
+                stdout=gzip_stdout,
+                text=True,
+            )
+
+        stderr = gzip_stderr.getvalue()
+        stdout = gzip_stdout.getvalue()
+
+        return resources.RunStepResult(
+            process_status=subprocess_result,
+            stderr=stderr,
+            stdout=stdout,
         )
 
     def _PrintTestResult(self, test_result):
@@ -144,12 +177,13 @@ class TestRunner:
         else:
             print("\033[31mFAILED\033[0m")
 
-            if self._verbose and test_result.stdout:
-                print(test_result.stdout)
-            if self._verbose and test_result.stderr:
-                print(test_result.stderr)
+            if self._verbose_stdout and test_result.stdout:
+                print(gzip.decompress(test_result.stdout).decode("utf-8"), end="")
 
-    def _ProcessStdout(self, test_definition, test_result, test_input=None):
+            if self._verbose_stderr and test_result.stderr:
+                print(gzip.decompress(test_result.stderr).decode("utf-8"), end="")
+
+    def _ProcessStdout(self, test_definition, test_result, stdout, test_input=None):
         """Processes stdout.
 
         * Normalizes stdout if specified;
@@ -158,10 +192,8 @@ class TestRunner:
         Args:
           test_definition (TestDefinition): test definition with Docker configuration.
           test_result (TestResult): test result to process.
+          stdout (bytes): gzip compressed stdout.
           test_input (Optional[InputDefinition]): input definition.
-
-        Returns:
-          bool: True if stdout was processed successfully.
 
         Raises:
           RuntimeError: if stdout definition is missing.
@@ -183,17 +215,17 @@ class TestRunner:
             test_parameters["%input%"] = test_input.name
 
         if stdout_definition.normalizer and stdout:
-            normalizer_process = self._NormalizeStdout(
+            run_step_result = self._NormalizeStdout(
                 stdout_definition.normalizer, stdout
             )
-            if normalizer_process.returncode != 0:
-                test_result.exit_code = normalizer_process.returncode
-                test_result.stderr = normalizer_process.stderr
-                test_result.stdout = normalizer_process.stdout
+            if not run_step_result.is_success():
+                test_result.exit_code = run_step_result.get_exit_code()
+                test_result.stderr = run_step_result.get_error_message()
+                test_result.stdout = run_step_result.get_output()
                 test_result.success = False
                 return
 
-            stdout = normalizer_process.stdout
+            stdout = run_step_result.get_output()
 
         reference_file = None
         if stdout_definition.reference_file:
@@ -209,15 +241,15 @@ class TestRunner:
                 return
 
         elif stdout_definition.validator and reference_file and stdout:
-            validator_process = self._ValidateStdout(
+            run_step_result = self._ValidateStdout(
                 stdout_definition.validator,
                 reference_file,
                 stdout,
             )
-            if validator_process.returncode != 0:
-                test_result.exit_code = validator_process.returncode
-                test_result.stderr = validator_process.stderr
-                test_result.stdout = validator_process.stdout
+            if not run_step_result.is_success():
+                test_result.exit_code = run_step_result.get_exit_code()
+                test_result.stderr = run_step_result.get_error_message()
+                test_result.stdout = run_step_result.get_output()
                 test_result.success = False
                 return
 
@@ -293,25 +325,40 @@ class TestRunner:
         test_result = resources.TestResult()
         test_result.start_time = time.time_ns()
 
-        subprocess_result = subprocess.run(
-            arguments,
-            capture_output=True,
-            check=False,
-            shell=False,
-            text=True,
-        )
+        with (
+            gzip_file.GzipStdoutWriter() as gzip_stdout,
+            gzip_file.GzipStdoutWriter() as gzip_stderr,
+        ):
+            subprocess_result = subprocess.run(
+                arguments,
+                check=False,
+                encoding="utf-8",
+                shell=False,
+                stderr=gzip_stderr,
+                stdout=gzip_stdout,
+                text=True,
+            )
+            stderr = gzip_stderr.getvalue()
+            stdout = gzip_stdout.getvalue()
+
         test_result.description = test_description
         test_result.end_time = time.time_ns()
         test_result.exit_code = subprocess_result.returncode
-        test_result.stderr = subprocess_result.stderr
-        test_result.stdout = subprocess_result.stdout
+        test_result.stderr = stderr
+        test_result.stdout = stdout
+
         test_result.success = subprocess_result.returncode == 0
 
         if path_mounted:
             self._UnmountInput(path_mounted)
 
         if test_definition.stdout:
-            self._ProcessStdout(test_definition, test_result, test_input=test_input)
+            self._ProcessStdout(
+                test_definition,
+                test_result,
+                gzip_stdout.getvalue(),
+                test_input=test_input,
+            )
 
         return test_result
 
@@ -364,29 +411,57 @@ class TestRunner:
 
         arguments = shlex.split(command, posix=self._is_posix)
 
+        env = {}
+        if test_definition.package.env:
+            env = test_definition.package.env.copy()
+
+        if arguments[0].endswith(".py"):
+            arguments = [sys.executable] + arguments
+
+            env["PYTHONPATH"] = package_path
+        elif arguments[0].endswith(".sh"):
+            shell = os.environ.get("SHELL", "/bin/bash")
+
+            arguments = [shell, "-l", "-i", "-c"] + arguments
+
         test_result = resources.TestResult()
         test_result.start_time = time.time_ns()
 
-        subprocess_result = subprocess.run(
-            arguments,
-            capture_output=True,
-            check=False,
-            env=test_definition.package.env,
-            shell=False,
-            text=True,
-        )
+        with (
+            gzip_file.GzipStdoutWriter() as gzip_stdout,
+            gzip_file.GzipStdoutWriter() as gzip_stderr,
+        ):
+            subprocess_result = subprocess.run(
+                arguments,
+                check=False,
+                encoding="utf-8",
+                env=env or None,
+                shell=False,
+                stderr=gzip_stderr,
+                stdout=gzip_stdout,
+                text=True,
+            )
+
+        stderr = gzip_stderr.getvalue()
+        stdout = gzip_stdout.getvalue()
+
         test_result.description = test_description
         test_result.end_time = time.time_ns()
         test_result.exit_code = subprocess_result.returncode
-        test_result.stderr = subprocess_result.stderr
-        test_result.stdout = subprocess_result.stdout
+        test_result.stderr = stderr
+        test_result.stdout = stdout
         test_result.success = subprocess_result.returncode == 0
 
         if path_mounted:
             self._UnmountInput(path_mounted)
 
         if test_definition.stdout:
-            self._ProcessStdout(test_definition, test_result, test_input=test_input)
+            self._ProcessStdout(
+                test_definition,
+                test_result,
+                gzip_stdout.getvalue(),
+                test_input=test_input,
+            )
 
         return test_result
 
@@ -423,21 +498,22 @@ class TestRunner:
 
         hdiutil_path = shutil.which("hdiutil")
         if hdiutil_path:
-            result = subprocess.run(
+            subprocess_result = subprocess.run(
                 [hdiutil_path, "info", "-plist"],
                 capture_output=True,
                 check=True,
+                encoding="utf-8",
                 shell=False,
                 text=True,
             )
-            if result.returncode != 0:
+            if subprocess_result.returncode != 0:
                 raise RuntimeError(
                     f"Unable to run: 'hdiutil info -plist' with error: "
-                    f"{result.stderr:s}"
+                    f"{subprocess_result.stderr:s}"
                 )
 
             try:
-                hdiutil_info = plistlib.load(result.stdout)
+                hdiutil_info = plistlib.load(subprocess_result.stdout)
             except Exception as exception:
                 raise RuntimeError(
                     "Unable to parse output of: 'hdiutil info -plist'"
@@ -468,6 +544,7 @@ class TestRunner:
                         arguments,
                         capture_output=True,
                         check=True,
+                        encoding="utf-8",
                         shell=False,
                         text=True,
                     )
@@ -493,6 +570,7 @@ class TestRunner:
                     arguments,
                     capture_output=True,
                     check=True,
+                    encoding="utf-8",
                     shell=False,
                     text=True,
                 )
@@ -519,25 +597,37 @@ class TestRunner:
         os.makedirs(reference_directory, exist_ok=True)
 
         if reference_writer:
-            if reference_writer.endswith(".py"):
-                arguments = [sys.executable, reference_writer, reference_file]
-            else:
-                arguments = [reference_writer, reference_file]
+            arguments = [reference_writer, reference_file]
 
-            result = subprocess.run(
-                arguments,
-                capture_output=True,
-                check=False,
-                input=stdout,
-                shell=False,
-                text=True,
-            )
-            if result.returncode != 0:
+            if reference_writer.endswith(".py"):
+                arguments = [sys.executable] + arguments
+            elif reference_writer.endswith(".sh"):
+                shell = os.environ.get("SHELL", "/bin/bash")
+
+                arguments = [shell, "-l", "-i", "-c"] + arguments
+
+            with gzip_file.GzipStdoutReader(stdout) as gzip_stdin:
+                subprocess_result = subprocess.run(
+                    arguments,
+                    capture_output=True,
+                    check=False,
+                    encoding="utf-8",
+                    stdin=gzip_stdin,
+                    shell=False,
+                    text=True,
+                )
+
+            if subprocess_result.returncode != 0:
                 return False
 
         else:
-            with open(reference_file, "w", encoding="utf-8") as file_object:
-                file_object.write(stdout)
+            if reference_file.endswith(".gz"):
+                with open(reference_file, "wb") as file_object:
+                    compressed_data = gzip.compress(stdout.encode("utf-8"))
+                    file_object.write(compressed_data)
+            else:
+                with open(reference_file, "w", encoding="utf-8") as file_object:
+                    file_object.write(stdout)
 
         return True
 
@@ -555,33 +645,46 @@ class TestRunner:
           stdout (str): the stdout to compare.
 
         Returns:
-          CompletedProcess: validator process object.
+          RunStepResult: validation results.
 
         Raises:
-          RuntimeError: if validator script or binary, or reference file does not
-              exist.
+          RuntimeError: if validator script or binary, or reference file does not exist.
         """
         arguments = shlex.split(validator, posix=self._is_posix)
 
         if not os.path.isfile(arguments[0]):
+            # TODO: return run result
             raise RuntimeError(f"Missing validator: {validator:s}")
 
         if arguments[0].endswith(".py"):
-            arguments.insert(0, sys.executable)
+            arguments = [sys.executable] + arguments
+        elif arguments[0].endswith(".sh"):
+            shell = os.environ.get("SHELL", "/bin/bash")
+
+            arguments = (
+                [shell, "-l", "-i", "-c"]
+                + [f'{arguments[0]:s} "$@"', "bash"]
+                + arguments[1:]
+            )
 
         if not os.path.isfile(reference_file):
+            # TODO: return run result
             raise RuntimeError(f"Missing reference file: {reference_file:s}")
 
         arguments.append(reference_file)
 
-        return subprocess.run(
-            arguments,
-            capture_output=True,
-            check=False,
-            input=stdout,
-            shell=False,
-            text=True,
-        )
+        with gzip_file.GzipStdoutReader(stdout) as gzip_stdin:
+            subprocess_result = subprocess.run(
+                arguments,
+                capture_output=True,
+                check=False,
+                encoding="utf-8",
+                stdin=gzip_stdin,
+                shell=False,
+                text=True,
+            )
+
+        return resources.RunStepResult(process_status=subprocess_result)
 
     def BuildPackage(self, test_definition):
         """Builds a package before running tests.
@@ -616,24 +719,27 @@ class TestRunner:
                 f"Command contains unresolved placeholders: {placeholders:s}"
             )
 
-        arguments.extend(shlex.split(command, posix=self._is_posix))
+        # We need to pass the command as a string, given that the user shell is used.
+        arguments.append(command)
 
-        result = subprocess.run(
+        subprocess_result = subprocess.run(
             arguments,
             capture_output=True,
             check=False,
             cwd=test_definition.package.path,
+            encoding="utf-8",
             env=test_definition.package.build_env,
             shell=False,
             text=True,
         )
-        if not self._quiet and result.returncode != 0:
-            if self._verbose and result.stdout:
-                print(result.stdout)
-            if self._verbose and result.stderr:
-                print(result.stderr)
+        if not self._quiet and subprocess_result.returncode != 0:
+            if self._verbose_stdout and subprocess_result.stdout:
+                print(subprocess_result.stdout, end="")
 
-        return result.returncode
+            if self._verbose_stderr and subprocess_result.stderr:
+                print(subprocess_result.stderr, end="")
+
+        return subprocess_result.returncode
 
     def BuildDockerImage(self, test_definition):
         """Builds a Docker image from a Dockerfile.
@@ -667,20 +773,22 @@ class TestRunner:
             test_definition.docker.dockerfile,
             ".",
         ]
-        result = subprocess.run(
+        subprocess_result = subprocess.run(
             arguments,
             capture_output=True,
             check=False,
+            encoding="utf-8",
             shell=False,
             text=True,
         )
-        if not self._quiet and result.returncode != 0:
-            if self._verbose and result.stdout:
-                print(result.stdout)
-            if self._verbose and result.stderr:
-                print(result.stderr)
+        if not self._quiet and subprocess_result.returncode != 0:
+            if self._verbose_stdout and subprocess_result.stdout:
+                print(subprocess_result.stdout, end="")
 
-        return result.returncode
+            if self._verbose_stderr and subprocess_result.stderr:
+                print(subprocess_result.stderr, end="")
+
+        return subprocess_result.returncode
 
     def ReadInputsConfiguration(self, path, sets_to_include=None):
         """Reads the inputs configuration from a file.
@@ -772,7 +880,8 @@ class TestRunner:
         def _run_job(task_index, task):
             test_runner = TestRunner(
                 quiet=self._quiet,
-                verbose=self._verbose,
+                verbose_stderr=self._verbose_stderr,
+                verbose_stdout=self._verbose_stdout,
                 write_references=self._write_references,
             )
             test_run = test_runner.RunTest(*task)
