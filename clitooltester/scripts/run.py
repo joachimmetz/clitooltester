@@ -128,9 +128,14 @@ def Main():
         sets_to_include = None
         if options.input_sets:
             sets_to_include = set(options.input_sets.split(","))
+
         test_inputs = runner.ReadInputsConfiguration(
             options.inputs, sets_to_include=sets_to_include
         )
+        if not test_inputs:
+            print("\033[31mERROR: missing tests inputs\033[0m")
+            return 1
+
         test_results = runner.RunTests(
             test_definition, jobs=options.jobs, test_inputs=test_inputs
         )

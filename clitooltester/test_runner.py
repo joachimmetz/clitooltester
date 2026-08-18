@@ -623,11 +623,10 @@ class TestRunner:
         else:
             if reference_file.endswith(".gz"):
                 with open(reference_file, "wb") as file_object:
-                    compressed_data = gzip.compress(stdout.encode("utf-8"))
-                    file_object.write(compressed_data)
+                    file_object.write(stdout)
             else:
                 with open(reference_file, "w", encoding="utf-8") as file_object:
-                    file_object.write(stdout)
+                    file_object.write(gzip.decompress(stdout).decode("utf-8"))
 
         return True
 
